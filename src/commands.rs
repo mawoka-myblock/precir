@@ -101,6 +101,21 @@ pub fn get_wakeup_command(plid: [u8; 4]) -> Vec<u8> {
     frame
 }
 
+pub fn change_page() -> Vec<u8> {
+    let mut frame: Vec<u8> = Vec::new();
+    // PP16 header required
+    frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x40]);
+
+    let frame_part: [u8; 11] = [
+        0x84, 0x00, 0x00, 0x00, 0x00, 0xAB, 0x11, 0x00, 0x00, 0xA5, 0xE4,
+    ];
+
+    // Frame body
+    frame.extend_from_slice(&frame_part);
+
+    frame
+}
+
 pub fn crc16(data: &[u8]) -> u16 {
     let mut crc: u16 = 0x8408;
     let poly: u16 = 0x8408;

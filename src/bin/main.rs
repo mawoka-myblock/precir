@@ -7,20 +7,19 @@
 )]
 use alloc::vec::Vec;
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Delay, Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::delay::Delay;
 use esp_hal::gpio::{Level, Output, OutputConfig, OutputPin};
 use esp_hal::peripherals;
-use esp_hal::rmt::{Rmt, TxChannelConfig};
+use esp_hal::rmt::{PulseCode, Rmt, TxChannelConfig};
 use esp_hal::rmt::{TxChannel, TxChannelCreator};
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::timer::timg::TimerGroup;
 // use esp_wifi::ble::controller::BleConnector;
 use log::info;
 use precir::commands::{
-    build_data_frames, get_final_frame, get_image_parameter_frame, get_wakeup_command,
+    build_data_frames, change_page, get_final_frame, get_image_parameter_frame, get_wakeup_command,
 };
 use precir::{frame_to_pulses, pp16_symbol_duration};
 
@@ -54,79 +53,32 @@ async fn main(spawner: Spawner) {
     let (mut _wifi_controller, _interfaces) = esp_wifi::wifi::new(&wifi_init, peripherals.WIFI)
         .expect("Failed to initialize WIFI controller");
     // let _connector = BleConnector::new(&wifi_init, peripherals.BT);
-    /*
-        let freq = esp_hal::time::Rate::from_mhz(80);
-        let rmt = Rmt::new(peripherals.RMT, freq).unwrap();
-        let mut tx = rmt
-            .channel0
-            .configure_tx(
-                peripherals.GPIO7,
-                TxChannelConfig::default()
-                    .with_clk_divider(1)
-                    .with_idle_output(true) // actively drive low when idle
-                    .with_idle_output_level(Level::Low)
-                    .with_carrier_modulation(true) // enable 1.25 MHz bursts
-                    .with_carrier_high(32) // 400 ns high
-                    .with_carrier_low(32) // 400 ns low  → ~1.25 MHz
-                    .with_carrier_level(Level::High), // carrier present when RMT level is High
-            )
-            .unwrap();
-    */
-    let mut op: Output<'_> = Output::new(
-        peripherals.GPIO7,
-        Level::Low,
-        OutputConfig::default().with_drive_mode(esp_hal::gpio::DriveMode::PushPull),
-    );
-    let _ = spawner;
 
-    info!("Starting loop");
+    let freq = esp_hal::time::Rate::from_mhz(80);
+    let rmt = Rmt::new(peripherals.RMT, freq).unwrap();
     let plid: [u8; 4] = [0xd0, 0x39, 0xc3, 0xde];
+    let mut tx = rmt
+        .channel0
+        .configure_tx(
+            peripherals.GPIO7,
+            TxChannelConfig::default()
+                .with_clk_divider(1)
+                .with_idle_output(true) // actively drive low when idle
+                .with_idle_output_level(Level::Low)
+                .with_carrier_modulation(true) // enable 1.25 MHz bursts
+                .with_carrier_high(32) // 400 ns high
+                .with_carrier_low(32) // 400 ns low  → ~1.25 MHz
+                .with_carrier_level(Level::High), // carrier present when RMT level is High
+        )
+        .unwrap();
     let wakeup_frame = get_wakeup_command(plid);
-    info!("Wakeup frame: {:?}", wakeup_frame);
-    /*
-        let wakeup_pulses = frame_to_pulses(wakeup_frame);
-        for _ in 0..400 {
-            let txing = tx.transmit(wakeup_pulses.as_slice()).unwrap();
-            tx = txing.wait().unwrap();
-            Timer::after(Duration::from_millis(10)).await;
-        }
-        info!("Finished Wakeup Transmit");
-
-        let mut img = build_black_square(16, 16);
-        let padding = (20 - (img.len() % 20)) % 20;
-        img.extend(core::iter::repeat(0).take(padding));
-
-        // let param_frame = get_image_parameter_frame(plid, 8, 8, 0, 0, img.len() as u16);
-        let param_frame = get_image_parameter_frame(plid, 16, 16, 0, 0, img.len() as u16);
-        info!("Param frame: {:?}", param_frame);
-        let param_pulses = frame_to_pulses(param_frame);
-        let txing = tx.transmit(param_pulses.as_slice()).unwrap();
+    info!("Frame: {:?}", &wakeup_frame);
+    let wakeup_pulses = frame_to_pulses(wakeup_frame);
+    for _ in 0..1000 {
+        let txing = tx.transmit(wakeup_pulses.as_slice()).unwrap();
         tx = txing.wait().unwrap();
-        info!("Transmitted Param frame");
-
-        let data_frames = build_data_frames(plid, &img);
-        for frame in data_frames {
-            info!("Data frame: {:?}", frame);
-            let pulses = frame_to_pulses(frame);
-            let txing = tx.transmit(pulses.as_slice()).unwrap();
-            tx = txing.wait().unwrap();
-        }
-        info!("Transmitted Data frames");
-
-        let final_frame = get_final_frame(plid);
-        info!("Final frame: {:?}", final_frame);
-        let final_pulses = frame_to_pulses(final_frame);
-        let txing = tx.transmit(final_pulses.as_slice()).unwrap();
-        tx = txing.wait().unwrap();
-        info!("Transmitted Final frame");
-    */
-    transmit_ppm(&mut op, wakeup_frame.as_ref()).await;
-    info!("Finished Single Wakeup Transmit");
-    for _ in 0..50 {
-        transmit_ppm(&mut op, wakeup_frame.as_ref()).await;
-        Timer::after(Duration::from_millis(10)).await;
     }
-    info!("Finished Wakeup Transmit");
+    info!("Wakeup done");
 
     let mut img = build_black_square(16, 16);
     let padding = (20 - (img.len() % 20)) % 20;
@@ -135,20 +87,27 @@ async fn main(spawner: Spawner) {
     // let param_frame = get_image_parameter_frame(plid, 8, 8, 0, 0, img.len() as u16);
     let param_frame = get_image_parameter_frame(plid, 16, 16, 0, 0, img.len() as u16);
     info!("Param frame: {:?}", param_frame);
-    transmit_ppm(&mut op, param_frame.as_ref()).await;
+    let param_pulses = frame_to_pulses(param_frame);
+    let txing = tx.transmit(param_pulses.as_slice()).unwrap();
+    tx = txing.wait().unwrap();
     info!("Transmitted Param frame");
 
     let data_frames = build_data_frames(plid, &img);
     for frame in data_frames {
         info!("Data frame: {:?}", frame);
-        transmit_ppm(&mut op, frame.as_ref()).await;
+        let pulses = frame_to_pulses(frame);
+        let txing = tx.transmit(pulses.as_slice()).unwrap();
+        tx = txing.wait().unwrap();
     }
     info!("Transmitted Data frames");
 
     let final_frame = get_final_frame(plid);
     info!("Final frame: {:?}", final_frame);
-    transmit_ppm(&mut op, final_frame.as_ref()).await;
+    let final_pulses = frame_to_pulses(final_frame);
+    let txing = tx.transmit(final_pulses.as_slice()).unwrap();
+    tx = txing.wait().unwrap();
     info!("Transmitted Final frame");
+
     // TODO: Spawn some tasks
 
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.0.0-rc.0/examples/src/bin

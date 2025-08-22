@@ -2,6 +2,7 @@
 extern crate alloc;
 use alloc::vec::Vec;
 use esp_hal::{gpio::Level, rmt::PulseCode};
+use esp_println::println;
 pub mod commands;
 // return µS
 pub fn pp16_symbol_duration(symbol: u8) -> u16 {
@@ -29,17 +30,15 @@ pub fn pp16_symbol_duration(symbol: u8) -> u16 {
 
 pub fn frame_to_pulses(frame: Vec<u8>) -> Vec<u32> {
     let mut pulses: Vec<u32> = Vec::new();
+    pulses.push(PulseCode::new(Level::High, 21 * 80, Level::Low, 10));
     for byte in frame {
         let mut nibble = byte;
         for _ in 0..2 {
             // two 4-bit symbols per byte
             let symbol = nibble & 0x0F; // extract LSB nibble
-            pulses.push(PulseCode::new(
-                Level::High,
-                21 * 80,
-                Level::Low,
-                (pp16_symbol_duration(symbol) - 21) * 80,
-            ));
+            let duration = pp16_symbol_duration(symbol);
+            let ticks = duration * 80;
+            pulses.push(PulseCode::new(Level::High, 21 * 80, Level::Low, ticks));
             nibble >>= 4; // next symbol
         }
     }
